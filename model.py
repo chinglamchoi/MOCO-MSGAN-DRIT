@@ -287,6 +287,7 @@ class DRIT(nn.Module):
     self.enc_c_opt.step()
     self.gen_opt.step()
 
+## ALERT ##
   def backward_EG(self):
     # content Ladv for generator
     loss_G_GAN_Acontent = self.backward_G_GAN_content(self.z_content_a)
