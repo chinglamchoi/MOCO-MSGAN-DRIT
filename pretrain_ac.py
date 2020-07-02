@@ -19,6 +19,7 @@ import torchvision.datasets as datasets
 import moco.loader
 import moco.builder
 
+import dataset
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -27,7 +28,7 @@ from torch.optim import lr_scheduler
 import torch.nn.functional as F
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('data', metavar='DIR', help='path to dataset')
+parser.add_argument('--dataroot', type=str, required=True, metavar='DIR', help='path to dataset')
 # architecture
 parser.add_argument('-j', '--workers', default=32, type=int, metavar='N',
                             help='number of data loading workers (default: 32)')
@@ -83,6 +84,14 @@ parser.add_argument('--aug-plus', action='store_true',
 parser.add_argument('--cos', action='store_true',
                             help='use cosine lr schedule')
 
+#opt.parser options
+parser.add_argument("--phase", type=str, default="train")
+parser.add_argument('--resize_size', type=int, default=256, help='resized image size for training')
+parser.add_argument('--crop_size', type=int, default=216, help='cropped image size for training')
+parser.add_argument('--input_dim_a', type=int, default=3, help='# of input channels for domain A')
+parser.add_argument('--input_dim_b', type=int, default=3, help='# of input channels for domain B')
+parser.add_argument("--mm", type=str, default="c", help="train content or attribute encoder")
+
 def main():
     args = parser.parse_args()
 
@@ -126,6 +135,14 @@ def main_worker(gpu, ngpus_per_node, args):
         else:
             model.cuda()
             model = torch.nn.parallel.DistributedDataParallel(model)
+    if args.mm == "c":
+        m = E_content()
+    else:
+        m = E_attr()
+    model = moco.builder.MoCo(
+        m,
+        args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp)
+
     elif args.gpu is not None:
         torch.cuda.set_device(args.gpu)
         model = model.cuda(args.gpu)
@@ -155,7 +172,92 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     # Data loading code
-    traindir = os.path.join(args.data, 'train')
+    train_dataset = dataset.dataset_unpair(args)
+    if args.distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    else:
+        train_sampler = None
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        num_workers=args.workers, pin_memory=True, sampler=train_sampler, drop_last=True)
+
+    for epoch in range(args.start_epoch, args.epochs):
+        if args.distributed:
+            train_sampler.set_epoch(epoch)
+        adjust_learning_rate(optimizer, epoch, args)
+
+        if not args.multiprocessing_distributed or (args.multiprocessing_distributed
+                and args.rank % ngpus_per_node == 0):
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'arch': args.arch,
+                'state_dict': model.state_dict(),
+                'optimizer' : optimizer.state_dict(),
+            }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch))
+
+def train(train_loader, model, criterion, optimizer, epoch, args):
+    batch_time = AverageMeter('Time', ':6.3f')
+    data_time = AverageMeter('Data', ':6.3f')
+    losses = AverageMeter('Loss', ':.4e')
+    top1 = AverageMeter('Acc@1', ':6.2f')
+    top5 = AverageMeter('Acc@5', ':6.2f')
+    progress = ProgressMeter(
+        len(train_loader),
+        [batch_time, data_time, losses, top1, top5],
+        prefix="Epoch: [{}]".format(epoch))
+
+    model.train()
+    end = time.time()
+    for i, (images, _) in enumerate(train_loader):
+        # measure data loading time
+        data_time.update(time.time() - end)
+
+        if args.gpu is not None:
+            images[0] = images[0].cuda(args.gpu, non_blocking=True)
+            images[1] = images[1].cuda(args.gpu, non_blocking=True)
+
+        # compute output
+        output, target = model(im_q=images[0], im_k=images[1])
+        loss = criterion(output, target)
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        losses.update(loss.item(), images[0].size(0))
+        top1.update(acc1[0], images[0].size(0))
+        top5.update(acc5[0], images[0].size(0))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        if i % args.print_freq == 0:
+            progress.display(i)
+
+def save_checkpoint(state, is_best, filename="checkpoint.pt"):
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pt')
+
+class AverageMeter(object):
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
+        self.reset()
+    def reset(self):
+        self.val, self.avg, self.sum, self.count = 0, 0, 0, 0
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+
+
 
 
 ####################################################################
