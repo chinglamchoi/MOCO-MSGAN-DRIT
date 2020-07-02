@@ -100,7 +100,7 @@ class MoCo(nn.Module):
         *** Only support DistributedDataParallel (DDP) model. ***
         """
         # gather from all gpus
-        batch_size_this = x.shape[0]
+        batch_size_this = x[0].shape[0]
         x_gather = concat_all_gather(x)
         batch_size_all = x_gather.shape[0]
 
@@ -115,15 +115,17 @@ class MoCo(nn.Module):
     def forward(self, im_q, im_k):
         """
         Input:
-            im_q: a batch of query images
-            im_k: a batch of key images
+            im_q: a batch of query images (A, B)
+            im_k: a batch of key images (A, B)
         Output:
             logits, targets
         """
 
         # compute query features
-        q = self.encoder_q(im_q)  # queries: NxC
-        q = nn.functional.normalize(q, dim=1)
+        q_A = self.encoder_q(im_q[0])  # queries: NxC
+        q_B = self.encoder_q(img_q[1])
+        q_A = nn.functional.normalize(q_A, dim=1)
+        q_B = nn.functional.normalize(q_B, dim=1)
 
         # compute key features
         with torch.no_grad():  # no gradient to keys
