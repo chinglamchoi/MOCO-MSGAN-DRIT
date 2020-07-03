@@ -81,7 +81,7 @@ class dataset_unpair(data.Dataset):
 
     # setup image transformation
     transforms = [
-      Resize((opts.resize_size, opts.resize_size), Image.BICUBIC)],
+      Resize((opts.resize_size, opts.resize_size), Image.BICUBIC),
       CenterCrop(opts.crop_size),
       RandomApply([ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
       RandomGrayscale(p=0.2),
@@ -108,7 +108,7 @@ class dataset_unpair(data.Dataset):
     else:
       data_A = self.load_img(self.A[random.randint(0, self.A_size - 1)], self.input_dim_A)
       data_B = self.load_img(self.B[index], self.input_dim_B)
-    return data_A, data_B
+    return data_A, data_B #[q_A, k_A], [q_B, k_B]
 
   def load_img(self, img_name, input_dim):
     img = Image.open(img_name).convert('RGB')

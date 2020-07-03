@@ -112,7 +112,7 @@ class MoCo(nn.Module):
 
         return x_gather[idx_this]
 
-    def forward(self, im_q, im_k):
+    def forward(self, ima_q, ima_k, imb_q, imb_k):
         """
         Input:
             im_q: a batch of query images (A, B)
@@ -122,23 +122,26 @@ class MoCo(nn.Module):
         """
 
         # compute query features
-        q_A = self.encoder_q(im_q[0])  # queries: NxC
-        q_B = self.encoder_q(img_q[1])
-        q_A = nn.functional.normalize(q_A, dim=1)
-        q_B = nn.functional.normalize(q_B, dim=1)
+        q = self.encoder_q(ima_q, imb_q)  # queries: NxC
+        qq = torch.stack(q[0], q[1])
+        q = nn.functional.normalize(qq, dim=1)
 
         # compute key features
         with torch.no_grad():  # no gradient to keys
             self._momentum_update_key_encoder()  # update the key encoder
 
             # shuffle for making use of BN
-            im_k, idx_unshuffle = self._batch_shuffle_ddp(im_k)
+            ima_k, idx_unshuffle1 = self._batch_shuffle_ddp(ima_k)
+            imb_k, idx_unshuffle2 = self._batch_shuffle_ddp(imb_k)
 
-            k = self.encoder_k(im_k)  # keys: NxC
-            k = nn.functional.normalize(k, dim=1)
+            k1, k2 = self.encoder_k(ima_k, imb_k)  # keys: NxC
+            k1 = nn.functional.normalize(k1, dim=1)
+            k2 = nn.functional.normalize(k2, dim=1)
 
             # undo shuffle
-            k = self._batch_unshuffle_ddp(k, idx_unshuffle)
+            k1 = self._batch_unshuffle_ddp(k1, idx_unshuffle1) #ALERT!!
+            k2 = self._batch_unshuffle_ddp(k2, idx_unshuffle2)
+            k = torch.stack(k1, k2)
 
         # compute logits
         # Einstein sum is more intuitive

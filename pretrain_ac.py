@@ -92,216 +92,6 @@ parser.add_argument('--input_dim_a', type=int, default=3, help='# of input chann
 parser.add_argument('--input_dim_b', type=int, default=3, help='# of input channels for domain B')
 parser.add_argument("--mm", type=str, default="c", help="train content or attribute encoder")
 
-def main():
-    args = parser.parse_args()
-
-    if args.seed is not None:
-        random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        cudnn.deterministic = True
-    if args.dist_url == "env://" and args.world_size == -1:
-        args.world_size = int(os.environ["WORLD_SIZE"])
-    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
-    ngpus_per_node = torch.cuda.device_count()
-    if args.multiprocessing_distributed:
-        args.world_size = ngpus_per_node * args.world_size
-        mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
-    else:
-        main_worker(args.gpu, ngpus_per_node, args)
-
-def main_worker(gpu, ngpus_per_node, args):
-    args.gpu = gpu
-    if args.multiprocessing_distributed and args.gpu != 0:
-        def print_pass(*args):
-            pass
-        builtins.print = print_pass
-    if args.gpu is not None:
-        print("Use GPU: {} for training".format(args.gpu))
-    if args.distributed:
-        if args.dist_url == "env://" and args.rank == -1:
-            args.rank = int(os.environ["RANK"])
-        if args.multiprocessing_distributed:
-            args.rank = args.rank * ngpus_per_node + gpu
-        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                                world_size=args.world_size, rank=args.rank)
-
-    if args.distributed:
-        if args.gpu is not None:
-            torch.cuda.set_device(args.gpu)
-            model.cuda(args.gpu)
-            args.batch_size = int(args.batch_size / ngpus_per_node)
-            args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
-        else:
-            model.cuda()
-            model = torch.nn.parallel.DistributedDataParallel(model)
-    if args.mm == "c":
-        m = E_content()
-    else:
-        m = E_attr()
-    model = moco.builder.MoCo(
-        m,
-        args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp)
-
-    elif args.gpu is not None:
-        torch.cuda.set_device(args.gpu)
-        model = model.cuda(args.gpu)
-        raise NotImplementedError("Only DistributedDataParallel is supported.")
-    else:
-        raise NotImplementedError("Only DistributedDataParallel is supported.")
-    
-    criterion = nn.CrossEntropyLoss().cuda(args.gpu)
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            if args.gpu is None:
-                checkpoint = torch.load(args.resume)
-            else:
-                loc = 'cuda:{}'.format(args.gpu)
-                checkpoint = torch.load(args.resume, map_location=loc)
-            args.start_epoch = checkpoint['epoch']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                              .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
-    cudnn.benchmark = True
-
-    # Data loading code
-    train_dataset = dataset.dataset_unpair(args)
-    if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    else:
-        train_sampler = None
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler, drop_last=True)
-
-    for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            train_sampler.set_epoch(epoch)
-        adjust_learning_rate(optimizer, epoch, args)
-
-        if not args.multiprocessing_distributed or (args.multiprocessing_distributed
-                and args.rank % ngpus_per_node == 0):
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'optimizer' : optimizer.state_dict(),
-            }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch))
-
-def train(train_loader, model, criterion, optimizer, epoch, args):
-    batch_time = AverageMeter('Time', ':6.3f')
-    data_time = AverageMeter('Data', ':6.3f')
-    losses = AverageMeter('Loss', ':.4e')
-    top1 = AverageMeter('Acc@1', ':6.2f')
-    top5 = AverageMeter('Acc@5', ':6.2f')
-    progress = ProgressMeter(
-        len(train_loader),
-        [batch_time, data_time, losses, top1, top5],
-        prefix="Epoch: [{}]".format(epoch))
-
-    model.train()
-    end = time.time()
-    for i, (images, _) in enumerate(train_loader):
-        # measure data loading time
-        data_time.update(time.time() - end)
-
-        if args.gpu is not None:
-            images[0] = images[0].cuda(args.gpu, non_blocking=True)
-            images[1] = images[1].cuda(args.gpu, non_blocking=True)
-
-        # compute output
-        output, target = model(im_q=images[0], im_k=images[1])
-        loss = criterion(output, target)
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        losses.update(loss.item(), images[0].size(0))
-        top1.update(acc1[0], images[0].size(0))
-        top5.update(acc5[0], images[0].size(0))
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        if i % args.print_freq == 0:
-            progress.display(i)
-
-def save_checkpoint(state, is_best, filename="checkpoint.pt"):
-    torch.save(state, filename)
-    if is_best:
-        shutil.copyfile(filename, 'model_best.pt')
-
-class AverageMeter(object):
-    def __init__(self, name, fmt=':f'):
-        self.name = name
-        self.fmt = fmt
-        self.reset()
-    def reset(self):
-        self.val, self.avg, self.sum, self.count = 0, 0, 0, 0
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-    def __str__(self):
-        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
-        return fmtstr.format(**self.__dict__)
-
-class ProgressMeter(object):
-    def __init__(self, num_batches, meters, prefix=""):
-        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
-        self.meters = meters
-        self.prefix = prefix
-    def display(self, batch):
-        entries = [self.prefix + self.batch_fmtstr.format(batch)]
-        entries += [str(meter) for meter in self.meters]
-        print('\t'.join(entries))
-    def _get_batch_fmtstr(self, num_batches):
-        num_digits = len(str(num_batches // 1))
-        fmt = '{:' + str(num_digits) + 'd}'
-        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
-
-def adjust_learning_rate(optimizer, epoch, args):
-    """Decay the learning rate based on schedule"""
-    lr = args.lr
-    if args.cos: #cosine lr schedule
-        lr *= 0.5 * (1. + math.cos(math.pi * epoch / args.epochs))
-    else:
-        for milestone in args.schedule:
-            lr *= 0.1 if epoch >= milestone else 1.
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-
-def accuracy(output, target, topk=(1,)):
-    """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
-        maxk = max(topk)
-        batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-        res = []
-        for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
-
-if __name__ == "__main__":
-    main()
-
-
-
 
 ####################################################################
 #---------------------------- Encoders -----------------------------
@@ -317,7 +107,7 @@ class E_content(nn.Module):
       tch *= 2
     for i in range(0, 3):
       encA_c += [INSResBlock(tch, tch)]
-
+        
     encB_c = []
     tch = 64
     encB_c += [LeakyReLUConv2d(input_dim_b, tch, kernel_size=7, stride=1, padding=3)]
@@ -326,28 +116,28 @@ class E_content(nn.Module):
       tch *= 2
     for i in range(0, 3):
       encB_c += [INSResBlock(tch, tch)]
-
+        
     enc_share = []
     for i in range(0, 1):
       enc_share += [INSResBlock(tch, tch)]
       enc_share += [GaussianNoiseLayer()]
       self.conv_share = nn.Sequential(*enc_share)
-
+        
     self.convA = nn.Sequential(*encA_c)
     self.convB = nn.Sequential(*encB_c)
-
+    
   def forward(self, xa, xb):
     outputA = self.convA(xa)
     outputB = self.convB(xb)
     outputA = self.conv_share(outputA)
     outputB = self.conv_share(outputB)
     return outputA, outputB
-
+    
   def forward_a(self, xa):
     outputA = self.convA(xa)
     outputA = self.conv_share(outputA)
     return outputA
-
+    
   def forward_b(self, xb):
     outputB = self.convB(xb)
     outputB = self.conv_share(outputB)
@@ -755,3 +545,211 @@ def remove_spectral_norm(module, name='weight'):
       return module
   raise ValueError("spectral_norm of '{}' not found in {}".format(name, module))
 
+
+
+def main():
+  args = parser.parse_args()
+
+  if args.seed is not None:
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    cudnn.deterministic = True
+  if args.dist_url == "env://" and args.world_size == -1:
+      args.world_size = int(os.environ["WORLD_SIZE"])
+  args.distributed = args.world_size > 1 or args.multiprocessing_distributed
+  ngpus_per_node = torch.cuda.device_count()
+  if args.multiprocessing_distributed:
+    args.world_size = ngpus_per_node * args.world_size
+    mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
+  else:
+    main_worker(args.gpu, ngpus_per_node, args)
+
+def main_worker(gpu, ngpus_per_node, args):
+  args.gpu = gpu
+  if args.multiprocessing_distributed and args.gpu != 0:
+    def print_pass(*args):
+      pass
+    builtins.print = print_pass
+  if args.gpu is not None:
+      print("Use GPU: {} for training".format(args.gpu))
+  if args.distributed:
+    if args.dist_url == "env://" and args.rank == -1:
+      args.rank = int(os.environ["RANK"])
+    if args.multiprocessing_distributed:
+      args.rank = args.rank * ngpus_per_node + gpu
+    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+                                                world_size=args.world_size, rank=args.rank)
+
+  if args.mm == "c":
+    m = E_content(args.input_dim_a, args.input_dim_b)
+  else:
+    m = E_attr()
+  model = moco.builder.MoCo(
+    m,
+    args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp)
+  if args.distributed:
+    if args.gpu is not None:
+      torch.cuda.set_device(args.gpu)
+      model.cuda(args.gpu)
+      args.batch_size = int(args.batch_size / ngpus_per_node)
+      args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
+      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+    else:
+      model.cuda()
+      model = torch.nn.parallel.DistributedDataParallel(model)
+  elif args.gpu is not None:
+    torch.cuda.set_device(args.gpu)
+    model = model.cuda(args.gpu)
+    raise NotImplementedError("Only DistributedDataParallel is supported.")
+  else:
+    raise NotImplementedError("Only DistributedDataParallel is supported.")
+    
+  criterion = nn.CrossEntropyLoss().cuda(args.gpu)
+  optimizer = torch.optim.SGD(model.parameters(), args.lr,
+              momentum=args.momentum,
+              weight_decay=args.weight_decay)
+  if args.resume:
+    if os.path.isfile(args.resume):
+      print("=> loading checkpoint '{}'".format(args.resume))
+      if args.gpu is None:
+        checkpoint = torch.load(args.resume)
+      else:
+        loc = 'cuda:{}'.format(args.gpu)
+        checkpoint = torch.load(args.resume, map_location=loc)
+      args.start_epoch = checkpoint['epoch']
+      model.load_state_dict(checkpoint['state_dict'])
+      optimizer.load_state_dict(checkpoint['optimizer'])
+      print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
+    else:
+      print("=> no checkpoint found at '{}'".format(args.resume))
+  cudnn.benchmark = True
+
+  # Data loading code
+  train_dataset = dataset.dataset_unpair(args)
+  if args.distributed:
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+  else:
+    train_sampler = None
+  train_loader = torch.utils.data.DataLoader(
+    train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+    num_workers=args.workers, pin_memory=True, sampler=train_sampler, drop_last=True)
+
+  for epoch in range(args.start_epoch, args.epochs):
+    if args.distributed:
+      train_sampler.set_epoch(epoch)
+    adjust_learning_rate(optimizer, epoch, args)
+
+    if not args.multiprocessing_distributed or (args.multiprocessing_distributed
+      and args.rank % ngpus_per_node == 0):
+      save_checkpoint({
+        'epoch': epoch + 1,
+        'arch': args.arch,
+        'state_dict': model.state_dict(),
+        'optimizer' : optimizer.state_dict(),
+      }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch))
+
+def train(train_loader, model, criterion, optimizer, epoch, args):
+  batch_time = AverageMeter('Time', ':6.3f')
+  data_time = AverageMeter('Data', ':6.3f')
+  losses = AverageMeter('Loss', ':.4e')
+  top1 = AverageMeter('Acc@1', ':6.2f')
+  top5 = AverageMeter('Acc@5', ':6.2f')
+  progress = ProgressMeter(
+    len(train_loader),
+    [batch_time, data_time, losses, top1, top5],
+    prefix="Epoch: [{}]".format(epoch))
+
+  model.train()
+  end = time.time()
+  for i, (images_A, images_B, _) in enumerate(train_loader):
+    # measure data loading time
+    data_time.update(time.time() - end)
+
+    if args.gpu is not None:
+        images_A[0] = images_A[0].cuda(args.gpu, non_blocking=True)
+        images_A[1] = images_A[1].cuda(args.gpu, non_blocking=True)
+        images_B[0] = images_B[0].cuda(args.gpu, non_blocking=True)
+        images_B[1] = images_B[1].cuda(args.gpu, non_blocking=True)
+    # compute output
+    output, target = model(ima_q=images_A[0], ima_k=images_A[1], imb_q=images_B[0], imb_k=images_B[1])
+    loss = criterion(output, target)
+    acc1, acc5 = accuracy(output, target, topk=(1, 5))
+    losses.update(loss.item(), images_A[0].size(0)) #ALERT!!
+    top1.update(acc1[0], images_A[0].size(0))
+    top5.update(acc5[0], images_A[0].size(0))
+
+    optimizer.zero_grad()
+    oss.backward()
+    optimizer.step()
+
+    # measure elapsed time
+    batch_time.update(time.time() - end)
+    end = time.time()
+
+    if i % args.print_freq == 0:
+      progress.display(i)
+
+def save_checkpoint(state, is_best, filename="checkpoint.pt"):
+  torch.save(state, filename)
+  if is_best:
+    shutil.copyfile(filename, 'model_best.pt')
+
+class AverageMeter(object):
+  def __init__(self, name, fmt=':f'):
+    self.name = name
+    self.fmt = fmt
+    self.reset()
+  def reset(self):
+    self.val, self.avg, self.sum, self.count = 0, 0, 0, 0
+  def update(self, val, n=1):
+    self.val = val
+    self.sum += val * n
+    self.count += n
+    self.avg = self.sum / self.count
+  def __str__(self):
+    fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+    return fmtstr.format(**self.__dict__)
+
+class ProgressMeter(object):
+  def __init__(self, num_batches, meters, prefix=""):
+    self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
+    self.meters = meters
+    self.prefix = prefix
+  def display(self, batch):
+    entries = [self.prefix + self.batch_fmtstr.format(batch)]
+    entries += [str(meter) for meter in self.meters]
+    print('\t'.join(entries))
+  def _get_batch_fmtstr(self, num_batches):
+    num_digits = len(str(num_batches // 1))
+    fmt = '{:' + str(num_digits) + 'd}'
+    return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+
+def adjust_learning_rate(optimizer, epoch, args):
+  """Decay the learning rate based on schedule"""
+  lr = args.lr
+  if args.cos: #cosine lr schedule
+    lr *= 0.5 * (1. + math.cos(math.pi * epoch / args.epochs))
+  else:
+    for milestone in args.schedule:
+      lr *= 0.1 if epoch >= milestone else 1.
+  for param_group in optimizer.param_groups:
+    param_group['lr'] = lr
+
+def accuracy(output, target, topk=(1,)):
+  """Computes the accuracy over the k top predictions for the specified values of k"""
+  with torch.no_grad():
+    maxk = max(topk)
+    batch_size = target.size(0)
+
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+    res = []
+    for k in topk:
+      correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+      res.append(correct_k.mul_(100.0 / batch_size))
+    return res
+
+if __name__ == "__main__":
+  main()
