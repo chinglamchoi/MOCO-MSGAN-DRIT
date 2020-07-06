@@ -52,11 +52,11 @@ parser.add_argument('-p', '--print-freq', default=10, type=int,
                             metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                             help='path to latest checkpoint (default: none)')
-parser.add_argument('--world-size', default=-1, type=int,
+parser.add_argument('--world-size', default=4, type=int,
                             help='number of nodes for distributed training')
-parser.add_argument('--rank', default=-1, type=int,
+parser.add_argument('--rank', default=4, type=int,
                             help='node rank for distributed training')
-parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str,
+parser.add_argument('--dist-url', default='tcp://localhost:2036', type=str,
                             help='url used to set up distributed training')
 parser.add_argument('--dist-backend', default='nccl', type=str,
                             help='distributed backend')
@@ -64,7 +64,7 @@ parser.add_argument('--seed', default=None, type=int,
                             help='seed for initializing training. ')
 parser.add_argument('--gpu', default=None, type=int,
                             help='GPU id to use.')
-parser.add_argument('--multiprocessing-distributed', action='store_true',
+parser.add_argument('--multiprocessing-distributed', default=False, action='store_true',
                             help='Use multi-processing distributed training to launch '
                                  'N processes per node, which has N GPUs. This is the '
                                  'fastest way to use PyTorch for either single node or '
@@ -554,41 +554,54 @@ def main():
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     cudnn.deterministic = True
+
   if args.dist_url == "env://" and args.world_size == -1:
       args.world_size = int(os.environ["WORLD_SIZE"])
   args.distributed = args.world_size > 1 or args.multiprocessing_distributed
   ngpus_per_node = torch.cuda.device_count()
+  print(ngpus_per_node)
+  args.gpu = [0,1,2,3]
+  args.multiprocessing_distributed = False
   if args.multiprocessing_distributed:
     args.world_size = ngpus_per_node * args.world_size
     mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
   else:
+    print("running")
     main_worker(args.gpu, ngpus_per_node, args)
 
 def main_worker(gpu, ngpus_per_node, args):
   args.gpu = gpu
+  print(args.gpu)
   if args.multiprocessing_distributed and args.gpu != 0:
     def print_pass(*args):
       pass
     builtins.print = print_pass
   if args.gpu is not None:
       print("Use GPU: {} for training".format(args.gpu))
+  #args.distributed = False
+  args.dist_url = "tcp://127.0.0.1:2036"
   if args.distributed:
     if args.dist_url == "env://" and args.rank == -1:
       args.rank = int(os.environ["RANK"])
     if args.multiprocessing_distributed:
       args.rank = args.rank * ngpus_per_node + gpu
+    print(args.world_size)
+    print(args.rank)
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                                 world_size=args.world_size, rank=args.rank)
-
+  print("define model")
   if args.mm == "c":
     m = E_content(args.input_dim_a, args.input_dim_b)
   else:
     m = E_attr()
+  print("building model")
   model = moco.builder.MoCo(
     m,
     args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp)
+  print(model)
   if args.distributed:
     if args.gpu is not None:
+      print(args.gpu)
       torch.cuda.set_device(args.gpu)
       model.cuda(args.gpu)
       args.batch_size = int(args.batch_size / ngpus_per_node)
@@ -625,7 +638,9 @@ def main_worker(gpu, ngpus_per_node, args):
   cudnn.benchmark = True
 
   # Data loading code
+  print("loading dataset")
   train_dataset = dataset.dataset_unpair(args)
+  print("loaded dataset")
   if args.distributed:
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
   else:
