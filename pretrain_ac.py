@@ -64,7 +64,7 @@ parser.add_argument('--seed', default=None, type=int,
                             help='seed for initializing training. ')
 parser.add_argument('--gpu', default=None, type=int,
                             help='GPU id to use.')
-parser.add_argument('--multiprocessing-distributed', default=False, action='store_true',
+parser.add_argument('--multiprocessing-distributed', default=True, action='store_true',
                             help='Use multi-processing distributed training to launch '
                                  'N processes per node, which has N GPUs. This is the '
                                  'fastest way to use PyTorch for either single node or '
@@ -560,8 +560,7 @@ def main():
   args.distributed = args.world_size > 1 or args.multiprocessing_distributed
   ngpus_per_node = torch.cuda.device_count()
   print(ngpus_per_node)
-  args.gpu = [0,1,2,3]
-  args.multiprocessing_distributed = False
+  args.gpu = [0,1,2,3,4,5,6,7]
   if args.multiprocessing_distributed:
     args.world_size = ngpus_per_node * args.world_size
     mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
@@ -571,24 +570,26 @@ def main():
 
 def main_worker(gpu, ngpus_per_node, args):
   args.gpu = gpu
-  print(args.gpu)
+  print("args.gpu:", args.gpu)
+  args.multiprocessing_distributed, args.distributed = True, True
   if args.multiprocessing_distributed and args.gpu != 0:
     def print_pass(*args):
       pass
     builtins.print = print_pass
   if args.gpu is not None:
-      print("Use GPU: {} for training".format(args.gpu))
-  #args.distributed = False
+    print("Use GPU: {} for training".format(args.gpu))
   args.dist_url = "tcp://127.0.0.1:2036"
   if args.distributed:
     if args.dist_url == "env://" and args.rank == -1:
       args.rank = int(os.environ["RANK"])
     if args.multiprocessing_distributed:
       args.rank = args.rank * ngpus_per_node + gpu
-    print(args.world_size)
-    print(args.rank)
-    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                                world_size=args.world_size, rank=args.rank)
+    args.rank = args.rank * ngpus_per_node + gpu
+    print("world size:", args.world_size)
+    print("rank:", args.rank)
+    print("dist backend:", args.dist_backend)
+    print("dist url:", args.dist_url)
+    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
   print("define model")
   if args.mm == "c":
     m = E_content(args.input_dim_a, args.input_dim_b)
