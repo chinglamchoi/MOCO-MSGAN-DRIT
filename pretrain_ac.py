@@ -571,6 +571,7 @@ def main():
 def main_worker(gpu, ngpus_per_node, args):
   args.gpu = gpu
   print("args.gpu:", args.gpu)
+  # problem: some code is only run once
   args.multiprocessing_distributed, args.distributed = True, True
   if args.multiprocessing_distributed and args.gpu != 0:
     def print_pass(*args):
