@@ -1,8 +1,9 @@
 import os
 import torch.utils.data as data
 from PIL import Image
-from torchvision.transforms import Compose, Resize, RandomCrop, CenterCrop, RandomHorizontalFlip, ToTensor, Normalize, RandomApply, ColorJItter
+from torchvision.transforms import Compose, Resize, RandomCrop, CenterCrop, RandomHorizontalFlip, ToTensor, Normalize, RandomApply, ColorJitter, RandomGrayscale
 import random
+import moco
 
 class dataset_single(data.Dataset):
   def __init__(self, opts, setname, input_dim):
@@ -112,6 +113,7 @@ class dataset_unpair(data.Dataset):
 
   def load_img(self, img_name, input_dim):
     img = Image.open(img_name).convert('RGB')
+    print(img.shape)
     q, k = moco.loader.TwoCropsTransform(self.transforms, img)
     img = self.transforms(img)
     if input_dim == 1:

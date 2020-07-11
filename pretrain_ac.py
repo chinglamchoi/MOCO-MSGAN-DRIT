@@ -91,7 +91,7 @@ parser.add_argument('--crop_size', type=int, default=216, help='cropped image si
 parser.add_argument('--input_dim_a', type=int, default=3, help='# of input channels for domain A')
 parser.add_argument('--input_dim_b', type=int, default=3, help='# of input channels for domain B')
 parser.add_argument("--mm", type=str, default="c", help="train content or attribute encoder")
-
+parser.add_argument("--no_flip", action="store_true", help="specified if no flipping")
 
 ####################################################################
 #---------------------------- Encoders -----------------------------
@@ -655,14 +655,16 @@ def main_worker(gpu, ngpus_per_node, args):
       train_sampler.set_epoch(epoch)
     adjust_learning_rate(optimizer, epoch, args)
 
+    train(train_loader, model, criterion, optimizer, epoch, args)
+
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed
       and args.rank % ngpus_per_node == 0):
-      save_checkpoint({
+      save_checkpoint(epoch, {
         'epoch': epoch + 1,
-        'arch': args.arch,
+        #'arch': args.arch,
         'state_dict': model.state_dict(),
         'optimizer' : optimizer.state_dict(),
-      }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch))
+      }, is_best=True, filename='checkpoint.pt')
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
   batch_time = AverageMeter('Time', ':6.3f')
@@ -705,10 +707,11 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     if i % args.print_freq == 0:
       progress.display(i)
 
-def save_checkpoint(state, is_best, filename="checkpoint.pt"):
-  torch.save(state, filename)
+def save_checkpoint(epoch, state, is_best, filename="checkpoint.pt"):
   if is_best:
-    shutil.copyfile(filename, 'model_best.pt')
+    torch.save(state, filename)
+    print("Best at epoch:", epoch)
+    #shutil.copyfile(filename, 'model_best.pt')
 
 class AverageMeter(object):
   def __init__(self, name, fmt=':f'):
