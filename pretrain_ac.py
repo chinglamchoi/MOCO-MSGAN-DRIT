@@ -52,9 +52,9 @@ parser.add_argument('-p', '--print-freq', default=10, type=int,
                             metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                             help='path to latest checkpoint (default: none)')
-parser.add_argument('--world-size', default=4, type=int,
+parser.add_argument('--world-size', default=1, type=int,
                             help='number of nodes for distributed training')
-parser.add_argument('--rank', default=4, type=int,
+parser.add_argument('--rank', default=1, type=int,
                             help='node rank for distributed training')
 parser.add_argument('--dist-url', default='tcp://localhost:2036', type=str,
                             help='url used to set up distributed training')
@@ -558,6 +558,7 @@ def main():
   if args.dist_url == "env://" and args.world_size == -1:
       args.world_size = int(os.environ["WORLD_SIZE"])
   args.distributed = args.world_size > 1 or args.multiprocessing_distributed
+  print(args.distributed, args.multiprocessing_distributed)
   ngpus_per_node = torch.cuda.device_count()
   print(ngpus_per_node)
   args.gpu = [0,1,2,3,4,5,6,7]
@@ -569,17 +570,15 @@ def main():
     main_worker(args.gpu, ngpus_per_node, args)
 
 def main_worker(gpu, ngpus_per_node, args):
-  args.gpu = gpu
-  print("args.gpu:", args.gpu)
-  # problem: some code is only run once: solve soon!
-  args.multiprocessing_distributed, args.distributed = True, True
-  if args.multiprocessing_distributed and args.gpu != 0:
-    def print_pass(*args):
-      pass
-    builtins.print = print_pass
-  if args.gpu is not None:
-    print("Use GPU: {} for training".format(args.gpu))
+  print(gpu, ngpus_per_node)
+  #if args.multiprocessing_distributed and args.gpu != 0:
+    #def print_pass(*args):
+      #pass
+    #builtins.print = print_pass
+  #if args.gpu is not None:
+    #print("Use GPU: {} for training".format(args.gpu))
   args.dist_url = "tcp://127.0.0.1:2036"
+  print(args.distributed)
   if args.distributed:
     if args.dist_url == "env://" and args.rank == -1:
       args.rank = int(os.environ["RANK"])
