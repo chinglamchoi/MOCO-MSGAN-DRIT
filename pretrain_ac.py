@@ -54,7 +54,7 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
                             help='path to latest checkpoint (default: none)')
 parser.add_argument('--world-size', default=1, type=int,
                             help='number of nodes for distributed training')
-parser.add_argument('--rank', default=1, type=int,
+parser.add_argument('--rank', default=0, type=int,
                             help='node rank for distributed training')
 parser.add_argument('--dist-url', default='tcp://localhost:2036', type=str,
                             help='url used to set up distributed training')
@@ -558,7 +558,6 @@ def main():
   if args.dist_url == "env://" and args.world_size == -1:
       args.world_size = int(os.environ["WORLD_SIZE"])
   args.distributed = args.world_size > 1 or args.multiprocessing_distributed
-  print(args.distributed, args.multiprocessing_distributed)
   ngpus_per_node = torch.cuda.device_count()
   print(ngpus_per_node)
   args.gpu = [0,1,2,3,4,5,6,7]
@@ -570,6 +569,7 @@ def main():
     main_worker(args.gpu, ngpus_per_node, args)
 
 def main_worker(gpu, ngpus_per_node, args):
+  ngpus_per_node = 1
   print(gpu, ngpus_per_node)
   #if args.multiprocessing_distributed and args.gpu != 0:
     #def print_pass(*args):
@@ -578,36 +578,35 @@ def main_worker(gpu, ngpus_per_node, args):
   #if args.gpu is not None:
     #print("Use GPU: {} for training".format(args.gpu))
   args.dist_url = "tcp://127.0.0.1:2036"
-  print(args.distributed)
   if args.distributed:
     if args.dist_url == "env://" and args.rank == -1:
       args.rank = int(os.environ["RANK"])
     if args.multiprocessing_distributed:
-      args.rank = args.rank * ngpus_per_node + gpu
-    args.rank = args.rank * ngpus_per_node + gpu
-    print("world size:", args.world_size)
+      #args.rank = args.rank * ngpus_per_node + gpu
+      args.rank = gpu
+    #args.rank = args.rank * ngpus_per_node + gpu
+    #print("world size:", args.world_size)
     print("rank:", args.rank)
-    print("dist backend:", args.dist_backend)
-    print("dist url:", args.dist_url)
+    #print("dist backend:", args.dist_backend)
+    #print("dist url:", args.dist_url)
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
-  print("define model")
+  #print("define model")
   if args.mm == "c":
     m = E_content(args.input_dim_a, args.input_dim_b)
   else:
     m = E_attr()
-  print("building model")
+  #print("building model")
   model = moco.builder.MoCo(
     m,
     args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp)
-  print(model)
+  #print(model)
   if args.distributed:
     if args.gpu is not None:
-      print(args.gpu)
-      torch.cuda.set_device(args.gpu)
-      model.cuda(args.gpu)
+      torch.cuda.set_device(0) #original: args.gpu / gpu
+      model.cuda(0) #args.gpu / gpu
       args.batch_size = int(args.batch_size / ngpus_per_node)
-      args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
-      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+      args.workers = 8 #int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
+      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=args.gpu)
     else:
       model.cuda()
       model = torch.nn.parallel.DistributedDataParallel(model)
