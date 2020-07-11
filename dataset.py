@@ -50,7 +50,8 @@ class dataset_single(data.Dataset):
 
   def load_img(self, img_name, input_dim):
     img = Image.open(img_name).convert('RGB')
-    q, k = moco.loader.TwoCropsTransform(self.transforms, img)
+    ff = moco.loader.TwoCropsTransform(self.transforms)
+    q, k = ff(img) #, img
     if input_dim == 1:
       q = q[0, ...] * 0.299 + q[1, ...] * 0.587 + q[2, ...] * 0.114
       k = k[0, ...] * 0.299 + k[1, ...] * 0.587 + k[2, ...] * 0.114
@@ -65,7 +66,6 @@ class dataset_single(data.Dataset):
 class dataset_unpair(data.Dataset):
   def __init__(self, opts):
     self.dataroot = opts.dataroot
-    print(self.dataroot)
     # A
     images_A = os.listdir(os.path.join(self.dataroot, opts.phase + 'A'))
     self.A = [os.path.join(self.dataroot, opts.phase + 'A', x) for x in images_A]
@@ -113,9 +113,9 @@ class dataset_unpair(data.Dataset):
 
   def load_img(self, img_name, input_dim):
     img = Image.open(img_name).convert('RGB')
-    print(img.shape)
-    q, k = moco.loader.TwoCropsTransform(self.transforms, img)
-    img = self.transforms(img)
+    ff = moco.loader.TwoCropsTransform(self.transforms)
+    q, k = ff(img)
+    #img = self.transforms(img)
     if input_dim == 1:
       q = q[0, ...] * 0.299 + q[1, ...] * 0.587 + q[2, ...] * 0.114
       k = k[0, ...] * 0.299 + k[1, ...] * 0.587 + k[2, ...] * 0.114
