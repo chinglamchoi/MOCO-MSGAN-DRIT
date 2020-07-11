@@ -28,7 +28,7 @@ from torch.optim import lr_scheduler
 import torch.nn.functional as F
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('--dataroot', type=str, required=True, metavar='DIR', help='path to dataset')
+parser.add_argument('--dataroot', type=str, default="data/cat2dog", metavar='DIR', help='path to dataset')
 # architecture
 parser.add_argument('-j', '--workers', default=32, type=int, metavar='N',
                             help='number of data loading workers (default: 32)')
@@ -560,6 +560,7 @@ def main():
   args.distributed = args.world_size > 1 or args.multiprocessing_distributed
   ngpus_per_node = torch.cuda.device_count()
   print(ngpus_per_node)
+  ngpus_per_node = 1
   args.gpu = [0,1,2,3,4,5,6,7]
   if args.multiprocessing_distributed:
     args.world_size = ngpus_per_node * args.world_size

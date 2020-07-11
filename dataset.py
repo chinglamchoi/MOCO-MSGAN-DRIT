@@ -1,7 +1,7 @@
 import os
 import torch.utils.data as data
 from PIL import Image
-from torchvision.transforms import Compose, Resize, RandomCrop, CenterCrop, RandomHorizontalFlip, ToTensor, Normalize
+from torchvision.transforms import Compose, Resize, RandomCrop, CenterCrop, RandomHorizontalFlip, ToTensor, Normalize, RandomApply, ColorJItter
 import random
 
 class dataset_single(data.Dataset):
@@ -64,7 +64,7 @@ class dataset_single(data.Dataset):
 class dataset_unpair(data.Dataset):
   def __init__(self, opts):
     self.dataroot = opts.dataroot
-
+    print(self.dataroot)
     # A
     images_A = os.listdir(os.path.join(self.dataroot, opts.phase + 'A'))
     self.A = [os.path.join(self.dataroot, opts.phase + 'A', x) for x in images_A]
