@@ -590,6 +590,7 @@ def main_worker(gpu, ngpus_per_node, args):
     print("rank:", args.rank)
     #print("dist backend:", args.dist_backend)
     #print("dist url:", args.dist_url)
+    print(args.world_size)
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
   #print("define model")
   if args.mm == "c":
@@ -655,7 +656,7 @@ def main_worker(gpu, ngpus_per_node, args):
       train_sampler.set_epoch(epoch)
     adjust_learning_rate(optimizer, epoch, args)
 
-    train(train_loader, model, criterion, optimizer, epoch, args)
+    train(gpu, train_loader, model, criterion, optimizer, epoch, args)
 
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed
       and args.rank % ngpus_per_node == 0):
@@ -666,7 +667,7 @@ def main_worker(gpu, ngpus_per_node, args):
         'optimizer' : optimizer.state_dict(),
       }, is_best=True, filename='checkpoint.pt')
 
-def train(train_loader, model, criterion, optimizer, epoch, args):
+def train(gpu, train_loader, model, criterion, optimizer, epoch, args):
   batch_time = AverageMeter('Time', ':6.3f')
   data_time = AverageMeter('Data', ':6.3f')
   losses = AverageMeter('Loss', ':.4e')
@@ -679,15 +680,15 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
   model.train()
   end = time.time()
-  for i, (images_A, images_B, _) in enumerate(train_loader):
+  for i, (images_A, images_B) in enumerate(train_loader):
     # measure data loading time
     data_time.update(time.time() - end)
 
     if args.gpu is not None:
-        images_A[0] = images_A[0].cuda(args.gpu, non_blocking=True)
-        images_A[1] = images_A[1].cuda(args.gpu, non_blocking=True)
-        images_B[0] = images_B[0].cuda(args.gpu, non_blocking=True)
-        images_B[1] = images_B[1].cuda(args.gpu, non_blocking=True)
+        images_A[0] = images_A[0].cuda(gpu, non_blocking=True)
+        images_A[1] = images_A[1].cuda(gpu, non_blocking=True)
+        images_B[0] = images_B[0].cuda(gpu, non_blocking=True)
+        images_B[1] = images_B[1].cuda(gpu, non_blocking=True)
     # compute output
     output, target = model(ima_q=images_A[0], ima_k=images_A[1], imb_q=images_B[0], imb_k=images_B[1])
     loss = criterion(output, target)

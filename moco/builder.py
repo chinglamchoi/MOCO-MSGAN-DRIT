@@ -71,9 +71,12 @@ class MoCo(nn.Module):
         Batch shuffle, for making use of BatchNorm.
         *** Only support DistributedDataParallel (DDP) model. ***
         """
+        print(torch.distributed.get_rank())
         # gather from all gpus
+        #print(x.shape) # [32, 3, 216, 216]
         batch_size_this = x.shape[0]
         x_gather = concat_all_gather(x)
+        #print(x_gather.shape) # [32, 3, 216, 216]
         batch_size_all = x_gather.shape[0]
 
         num_gpus = batch_size_all // batch_size_this
@@ -123,7 +126,7 @@ class MoCo(nn.Module):
 
         # compute query features
         q = self.encoder_q(ima_q, imb_q)  # queries: NxC
-        qq = torch.stack(q[0], q[1])
+        qq = torch.stack((q[0], q[1]))
         q = nn.functional.normalize(qq, dim=1)
 
         # compute key features
@@ -141,7 +144,7 @@ class MoCo(nn.Module):
             # undo shuffle
             k1 = self._batch_unshuffle_ddp(k1, idx_unshuffle1) #ALERT!!
             k2 = self._batch_unshuffle_ddp(k2, idx_unshuffle2)
-            k = torch.stack(k1, k2)
+            k = torch.stack((k1, k2))
 
         # compute logits
         # Einstein sum is more intuitive
