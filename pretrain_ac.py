@@ -576,7 +576,7 @@ def main_worker(gpu, ngpus_per_node, args):
     #def print_pass(*args):
       #pass
     #builtins.print = print_pass
-  #if args.gpu is not None:
+  ##if args.gpu is not None:
     #print("Use GPU: {} for training".format(args.gpu))
   args.dist_url = "tcp://127.0.0.1:2036"
   if args.distributed:
